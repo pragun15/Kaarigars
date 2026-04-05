@@ -1,0 +1,431 @@
+CONTEXT DOCUMENT
+
+The Task:
+Build a complete, real-world OpenEnv environment that an AI agent can learn from through the standard  step() / reset() / state()  API.
+
+Key Requirements at a Glance:
+Must simulate a real-world task (not games or toys)
+Implement full OpenEnv spec: typed models, step()/reset()/state(), openenv.yaml
+Minimum 3 tasks with agent graders (easy → medium → hard, scores/reward 0.0–1.0)
+Meaningful reward function with partial progress signals
+Baseline inference script with reproducible scores
+Deploy to Hugging Face Spaces + working Dockerfile
+README with environment description, action/observation spaces, setup instructions
+
+Problem statement:
+Focus on Triage & Efficiency Build an autonomous Search and Rescue agent to locate and save people in simulated earthquake ruins. Using a standardized legged robot, the agent must use smart triage to save at risk victims first. The challenge is to optimize sensor use and pathfinding to stay within a strict 90-120 minute power budget while navigating through debris.
+
+
+Environment:
+
+1. Unified Robot Configuration
+
+Physical Specifications:
+
+* Maximum Speed: 0.8 – 1.6 m/s
+* Weight: 20 – 32 kg
+* Endurance: 90 – 120 minutes
+
+Sensor Suite (Available in All Levels):
+
+* Mapping: 360° Precision LiDAR (3D)
+* Visual Systems: RGB-D Camera + Thermal Imaging (HD heat signatures)
+* Safety Monitoring: Full Gas Sensor Array (O₂, CO, CH₄, CO₂, H₂S)
+* Victim Detection:Acoustic Sensors + CO₂-based Victim Locators
+* Orientation:Zero Drift IMU (Inertial Measurement Unit)
+
+2. EASY LEVEL 
+
+Objective:
+Perform a complete sweep and mapping of a stable environment.
+
+Environment & Seismic Properties
+
+* Weather: Summer (Clear conditions, optimal visibility)
+* Crowd Density:
+
+  * Day: 1 PM – 4 PM
+  * Night: 1 AM – 4 AM
+* Magnitude (Mw): 4.0 – 5.5 (Duration: 10 – 20 seconds)
+* Epicenter Distance: 75 – 95 km (Distant impact)
+
+Building & Population
+
+* Structure Type: Strong 
+
+* Building Height:
+
+  * Commercial: 1 – 3 floors
+  * Residential: 4 – 7 floors
+
+* Structural Integrity Distribution:
+
+  * Weak: 0–10%
+  * Medium: 10–30%
+  * Strong: 30–80%
+
+* Population Size: 40 – 80 individuals
+
+  * Gender Ratio: 50% Male / 50% Female
+  * Age Distribution:
+
+    * Children: 10–20%
+    * Adults: 60–75%
+    * Elderly: 10–20%
+
+* Health Status:
+
+  * Healthy: 80–90%
+  * Vulnerable: 8–15%
+  * Critical: 2–5%
+
+* Entrapment Rate: 5–12%
+
+* Debris Distribution:
+
+  * Light: 85–92%
+  * Severe: 5–10%
+  * Critical: 2–3%
+
+ Sensor Performance
+* Accuracy: 100% 
+
+Battery Consumption Model
+
+* Base Movement: 0.8% per minute
+* Sensor Load: 0.3% per minute
+* Idle Consumption: 0.1% per minute
+
+
+
+3. MEDIUM LEVEL 
+Objective:
+Execute strategic triage and navigate through visibility impaired conditions.
+
+Environment & Seismic Properties
+
+* Weather: Winter (Fog and cold conditions reducing visibility)
+* Crowd Density:
+
+  * Day: 6 AM – 9 AM
+  * Night: 8 PM – 11 PM
+* Magnitude (Mw): 5.5 – 6.5 (Duration: 20 – 35 seconds)
+* Epicenter Distance: 50 – 70 km 
+
+Building & Population
+
+* Structure Type: Moderate
+
+* Building Height:
+
+  * Commercial: 2 – 4 floors
+  * Residential: 7 – 14 floors
+
+* Structural Integrity Distribution:
+
+  * Weak: 0–25%
+  * Medium: 25–70%
+  * Strong: 70–100%
+
+* Population Size: 100 – 150 individuals
+
+  * Gender Ratio: 50% Male / 50% Female
+  * Age Distribution:
+
+    * Children: 20–30%
+    * Adults: 45–60%
+    * Elderly: 15–25%
+
+* Health Status:
+
+  * Healthy: 55–70%
+  * Vulnerable: 20–30%
+  * Critical: 10–20%
+
+* Entrapment Rate: 20–35%
+
+* Debris Distribution:
+
+  * Light: 50–60%
+  * Severe: 25–30%
+  * Critical: 10–20%
+
+Sensor Performance
+
+* LiDAR and RGB-D experience ~20% noise due to fog interference
+
+Battery Consumption Model
+
+* Base Movement: 1.2% per minute
+* Sensor Load: 0.5% per minute
+* Idle Consumption: 0.2% per minute
+
+4. HARD LEVEL 
+
+Objective:
+Manage extreme risk conditions and operate under partial hardware degradation.
+
+Environment & Seismic Properties
+
+* Weather: Rainy (Mud and slippage increase movement difficulty and power usage)
+* Crowd Density:
+
+  * Day: 8 AM – 11 AM
+  * Night: 6 PM – 10 PM
+* Magnitude (Mw): 6.5 – 7.5 (Duration: 40 – 60 seconds)
+* Epicenter Distance: Less than 50 km (Direct impact zone)
+
+Building & Population
+
+* Structure Type: Weak 
+* Building Height:
+
+  * Commercial: 4 – 7 floors
+  * Residential: 9 – 15 floors
+
+* Structural Integrity Distribution:
+
+  * Weak: 0–45%
+  * Medium: 45–75%
+  * Strong: 75–100%
+
+* Population Size: 150 – 300 individuals
+
+  * Gender Ratio: 50% Male / 50% Female
+  * Age Distribution:
+
+    * Children: 15–25%
+    * Adults: 40–55%
+    * Elderly: 25–35%
+
+* Health Status:
+
+  * Healthy: 30–50%
+  * Vulnerable: 25–40%
+  * Critical: 25–45%
+
+* Entrapment Rate: 50–85%
+
+* Debris Distribution:
+
+  * Light: 15–25%
+  * Severe: 30–40%
+  * Critical: 30–45%
+
+Sensor Performance
+
+* LiDAR severely degraded or blocked due to rain, dust, and debris
+
+Battery Consumption Model
+
+* Base Movement: 2.5% per minute (due to mud and debris resistance)
+* Sensor Load: 0.8% per minute (increased processing for noise handling)
+* Idle Consumption: 0.5% per minute (power leakage due to environmental contact)
+
+
+SCORING SYSTEM 
+
+1. Introduction
+The scoring system assesses performance across five core dimensions:
+
+Operational Safety
+Victim Handling
+Decision Intelligence
+Operational Efficiency
+Time Performance
+
+The system ensures non redundant evaluation metrics, real world alignment with rescue priorities, robust penalty mechanisms, and fair scoring across all difficulty levels.
+
+2. Final Reward Formula: 
+S_final =0.20 * S_safety +0.30 * S_victim +0.20 * S_decision +0.20 * S_efficiency +0.10 * S_time
+
+Total Weight = 1.00
+
+3. Absolute Penalty System
+
+Penalties are applied after computing the final score:
+
+S_final_adjusted = max(0.0, S_final - sum_of_penalties)
+
+Penalty Definitions:
+
+Crush injury extracted without prior flag: -0.25
+Robot entered critical gas zone: -0.15
+False explosion triggered: -0.30
+Robot destroyed due to preventable cause: -0.20
+
+Final score is clipped to a minimum of 0.0.
+
+4. Pillar 1: Operational Safety (Weight = 0.20)
+
+4.1 S_survival (Weight = 0.10)
+
+Range: 0.0 to 1.0
+Base Value: 1.0
+
+Collision Definition:
+
+Minor debris contact is not considered a collision.
+Impact greater than 0.3 m/s is considered a collision.
+Movement causing structural disturbance is considered a collision.
+
+Penalty Structure:
+
+First collision: -0.04
+Second collision: -0.08
+Third collision: -0.15
+Collision near survivor: -0.25
+
+Additional Penalties:
+
+Joint damage: -0.08
+Tip over with recovery: -0.10
+
+Reasoning:
+Ensures safe navigation and minimizes additional damage in fragile environments.
+
+4.2 S_stability (Weight = 0.10)
+
+S_stability =(1 - (instability_events / total_steps)) * 0.7 +(stability_recovery * 0.3)
+
+Recovery Component:
+
+If no instability events: stability_recovery = 1.0
+Otherwise: stability_recovery = successful_recoveries / total_events
+
+Reasoning:
+Evaluates both terrain handling and recovery capability.
+
+
+
+5. Pillar 2: Victim Handling (Weight = 0.30)
+
+5.1 Detection Accuracy (Weight = 0.08)
+
+S_detection =(TP / total_victims) * 0.7 +(confidence * 0.3) -(FP * 0.15)
+
+Definitions:
+
+True Positive (TP): Victim detected within 2 meters
+False Positive (FP): Incorrect detection
+
+Reasoning:
+Measures sensing reliability independently from exploration behavior.
+
+5.2 S_victim_location (Weight = 0.10)
+
+S_location =(accurately_located / detected) * 0.6 +(precision * 0.4)
+
+Precision Threshold:
+
+Error ≤ 0.5 m → Score 1.0
+Error ≤ 1.5 m → Score 0.7
+Error ≤ 3.0 m → Score 0.3
+Error > 3.0 m → Score 0.0
+
+The unit “m” refers to meters, which measure the distance error between the robot’s predicted victim location and the actual victim position. This threshold defines how accurately the robot can localize a victim. Smaller errors indicate higher precision and receive higher scores, while larger errors reduce the score. This ensures that the robot is rewarded not just for detecting victims, but for identifying their exact location accurately, which is critical for efficient rescue operations.
+
+Reasoning:
+Accurate localization is essential for effective rescue.
+
+5.3 Rescue Score (Weight = 0.10)
+
+S_rescue =(rescued / detected) * 0.6 +(successful_rescues / attempts) * 0.4
+
+Penalties:
+
+Improper handling: -0.10
+Dropped victim: -0.15
+
+Reasoning:
+Evaluates execution effectiveness during rescue operations.
+
+5.4 Rescue Order (Weight = 0.08)
+
+S_order =(correct_priority_rescues / total_rescues)
+
+Penalty:
+Incorrect rescue order (low priority before critical): -0.10 per event
+
+Reasoning:
+Ensures prioritization aligns with survival urgency.
+
+6. Pillar 3: Decision Intelligence (Weight = 0.20)
+
+6.1 Priority Score (Weight = 0.12)
+
+S_priority =(correct_priority_assignments / total_victims)
+
+Considerations:
+
+Health condition
+Accessibility
+Survival probability
+
+Penalty:
+Misclassification of a critical victim: -0.15
+
+Reasoning:
+Represents the core decision-making capability of the system.
+
+6.2 Environment Scanning (Weight = 0.08)
+
+S_env =(useful_insights / total_scans) * 0.6 +(coverage * 0.4)
+
+Penalties:
+Missed major hazard: -0.10
+Redundant scanning: -0.05
+
+Reasoning:
+Captures environmental awareness while avoiding redundancy with sensor metrics.
+
+7. Pillar 4: Operational Efficiency (Weight = 0.20)
+
+7.1 S_energy (Weight = 0.10)
+
+S_energy =(remaining_battery / 100) * 0.5 +(work_accomplished / energy_used) * 0.5
+
+Work Definition:
+
+work =(2 * victims) +(1 * hazards) +(0.5 * zones)-(0.3 * unnecessary_actions)
+
+Reasoning:
+Encourages productive energy utilization.
+
+7.2 S_path_efficiency (Weight = 0.10)
+
+S_path = 1 - (revisit_ratio * 0.4) - (idle_ratio * 0.3) + (smoothness * 0.3)
+
+Reasoning:
+Measures practical navigation efficiency without relying on ideal path assumptions.
+
+8. Pillar 5: Time Performance (Weight = 0.10)
+
+8.1 S_time
+
+S_time =max(0, 1.0 if within limit,otherwise (time_remaining / limit) * 0.6 + 0.4)
+
+Golden Hour Limits:
+
+Easy: 90 minutes
+Medium: 60 minutes
+Hard: 45 minutes
+
+Reasoning:
+Ensures urgency without producing negative scores.
+
+9. System Design Advantages
+
+Non-Redundancy:
+
+Each metric evaluates a distinct capability. Detection, localization, decision making, and execution are all independent.
+
+Robustness:
+Absolute penalties prevent unsafe exploitation.
+Score flooring ensures stability.
+
+Scalability:
+The same scoring system applies consistently across multiple environments and all difficulty levels.
+
+10. Conclusion:
+This scoring system provides a balanced, realistic, and implementation-ready evaluation model for autonomous rescue systems. It emphasizes safety, intelligent decision making, and efficient execution while ensuring fairness and consistency across varying scenarios.
