@@ -1,0 +1,16 @@
+difficulty: medium
+time_limit_minutes: 60
+weather: winter_fog
+sensor_noise:
+  lidar: 0.2
+  rgbd: 0.2
+battery_model:
+  movement_per_minute: 1.2
+  sensor_per_minute: 0.5
+  idle_per_minute: 0.2
+task:
+  name: strategic_triage
+  success_criteria:
+    critical_victims_rescued: 0.80
+    priority_score: 0.75
+    safety_score: 0.70

@@ -1,0 +1,16 @@
+difficulty: hard
+time_limit_minutes: 45
+weather: rain_mud
+sensor_noise:
+  lidar: 0.5
+  rgbd: 0.5
+battery_model:
+  movement_per_minute: 2.5
+  sensor_per_minute: 0.8
+  idle_per_minute: 0.5
+task:
+  name: extreme_rescue
+  success_criteria:
+    victims_rescued: 0.60
+    decision_score: 0.65
+    mission_completion: 0.70
