@@ -1,0 +1,4 @@
+numpy>=1.24.0
+pydantic>=2.6.0
+PyYAML>=6.0.1
+pytest>=8.0.0
