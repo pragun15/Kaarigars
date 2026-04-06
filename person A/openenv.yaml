@@ -1,0 +1,23 @@
+name: rescue-robot-earthquake-v1
+version: 0.1.0
+description: >
+  OpenEnv-compatible earthquake rescue environment with triage-focused
+  robot navigation, sensing, and resource constraints.
+author: Kaarigars Team
+license: MIT
+
+environment:
+  class: rescue_env.core.environment.RescueEnvironment
+
+reward_range: [0.0, 1.0]
+
+tasks:
+  - name: sweep_and_map
+    difficulty: easy
+    description: Complete stable-area sweep and mapping.
+  - name: strategic_triage
+    difficulty: medium
+    description: Triage and rescue in noisy sensing conditions.
+  - name: extreme_rescue
+    difficulty: hard
+    description: High-risk rescue under severe degradation.
