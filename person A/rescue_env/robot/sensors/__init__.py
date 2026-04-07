@@ -1,1 +1,0 @@
-"""Sensor simulation hooks."""

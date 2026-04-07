@@ -1,38 +1,220 @@
+---
+title: Rescue Robot OpenEnv
+sdk: docker
+app_port: 7860
+tags:
+  - openenv
+---
+
 # Rescue Robot OpenEnv
 
-Production-focused OpenEnv environment for earthquake search and rescue.
+Earthquake search-and-rescue simulation environment designed for training and evaluating agentic policies on a real-world utility task.
 
-## Current Status
-This folder is the merged project containing:
-1. Environment simulation core (reset/step/state API).
-2. Multi-pillar scoring and penalties.
-3. Easy/medium/hard task grading.
-4. Baseline agents and evaluation runner.
+## Why this environment
 
-## Quick Start
-1. Install dependencies:
-   - `pip install -r requirements.txt`
-2. Run scoring unit tests:
-   - `pytest -q tests/test_scoring.py`
-3. Run baseline in mock mode:
-   - `python -m baselines.run_baseline --mode mock --episodes 5 --seed 42`
-4. Run baseline in environment mode:
-   - `python -m baselines.run_baseline --mode env --difficulty easy --episodes 3 --seed 42`
+Urban search and rescue requires balancing speed, safety, triage priority, and constrained battery/time resources.
+This environment models those trade-offs in a deterministic, programmatically graded setup suitable for reproducible benchmarking.
 
-## Repository Areas
-- `rescue_env/core/`: OpenEnv-compatible environment shell and config.
-- `rescue_env/models/`: typed action, observation, state, robot, victim models.
-- `rescue_env/world/`: map, debris, hazards, physics, victim generation.
-- `rescue_env/robot/`: controller, battery, sensor simulation hooks.
-- `rescue_env/scoring/`: reward pillars, penalties, grader.
-- `rescue_env/tasks/`: easy/medium/hard task definitions and criteria.
-- `baselines/`: baseline policies and runner.
-- `openenv.yaml`: OpenEnv spec entry point.
+## OpenEnv Compliance Summary
 
-## Verification Commands
-1. `pytest -q tests/test_scoring.py`
-2. `python -m baselines.run_baseline --mode mock --difficulty easy --episodes 5 --seed 42`
-3. `python -m baselines.run_baseline --mode env --difficulty easy --episodes 2 --seed 42`
+- Typed models:
+  - `rescue_env/models/actions.py`
+  - `rescue_env/models/observations.py`
+  - `rescue_env/models/state.py`
+- Environment API:
+  - `reset(seed) -> Observation`
+  - `step(action) -> (Observation, reward, done, truncated, info)`
+  - `state() -> StateSnapshot`
+- OpenEnv metadata: `openenv.yaml`
+- Tasks with deterministic graders (easy/medium/hard): implemented in `rescue_env/tasks/` and `rescue_env/scoring/grader.py`
+- Root baseline inference script required by submission rules: `inference.py`
 
-## Notes
-The environment now emits `episode_stats` and `score_breakdown` in step `info` payloads for grading and baseline evaluation.
+## Action Space
+
+Action payload format used by the environment:
+
+```json
+{
+  "action_type": "move|scan_lidar|scan_thermal|scan_gas|listen|rescue_victim|flag_hazard|idle",
+  "parameters": {}
+}
+```
+
+Action details:
+
+1. `move`
+   - parameters: `target_position: [x, y]`, `speed: float`
+2. `scan_lidar` / `scan_thermal` / `scan_gas` / `listen`
+   - parameters: `{}`
+3. `rescue_victim`
+   - parameters: `victim_id: str`, `handling_method: str`
+4. `flag_hazard`
+   - parameters: `hazard_type: str`, `location: [x, y]`
+5. `idle`
+   - parameters: `{}`
+
+## Observation Space
+
+Primary top-level fields returned by `reset()` and `step()`:
+
+1. `robot_status`
+   - `position`, `orientation_deg`, `battery_level`, `is_stable`, `carrying_victim`
+2. `sensors`
+   - `lidar_points`, `thermal_signatures`, `gas_levels`, `acoustic_events`
+3. `nearby_victims`
+4. `nearby_hazards`
+5. `time_remaining`
+6. `mission_progress`
+
+## Task Suite and Graders
+
+Three deterministic tasks are included, each scored in `[0.0, 1.0]`.
+
+1. Easy: `sweep_and_map`
+   - Goal: high map coverage and detection in stable conditions.
+   - Criteria: `map_coverage`, `victims_detected`, `battery_remaining`.
+2. Medium: `strategic_triage`
+   - Goal: prioritize critical rescues with safety under degraded sensing.
+   - Criteria: `critical_victims_rescued`, `priority_score`, `safety_score`.
+3. Hard: `extreme_rescue`
+   - Goal: mass-casualty recovery under severe hazard pressure.
+   - Criteria: `victims_rescued`, `decision_score`, `mission_completion`.
+
+Grading and score normalization logic:
+
+- `rescue_env/tasks/base_task.py`
+- `rescue_env/scoring/grader.py`
+
+## Reward Design
+
+The reward is shaped over the full trajectory and includes:
+
+1. Positive progress signals
+   - new victim detection, rescue events, critical rescue events, hazard flagging, exploration, effective actions.
+2. Negative behavior penalties
+   - collisions, dropped victims, unsafe or destructive behavior penalties.
+3. Terminal score component
+   - weighted multi-pillar final score with absolute penalties.
+
+Reward and final-score modules:
+
+- `rescue_env/scoring/reward_calculator.py`
+- `rescue_env/scoring/penalties.py`
+- `rescue_env/scoring/metrics/`
+
+## Setup
+
+1. Create and activate a virtual environment.
+2. Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+3. Run tests:
+
+```bash
+pytest -q tests/test_scoring.py tests/test_env_integration.py
+```
+
+## Required Inference Environment Variables
+
+The root `inference.py` consumes the required variables from submission instructions:
+
+1. `API_BASE_URL`
+2. `MODEL_NAME`
+3. `HF_TOKEN`
+
+Copy `.env.example` to `.env` and set values.
+
+## Baseline Inference (Mandatory Script)
+
+Run:
+
+```bash
+python inference.py
+```
+
+The script:
+
+1. Uses OpenAI client SDK (`from openai import OpenAI`).
+2. Runs all 3 tasks by default.
+3. Emits strict structured stdout lines:
+   - `[START] task=... env=... model=...`
+   - `[STEP] step=... action=... reward=... done=... error=...`
+   - `[END] success=... steps=... score=... rewards=...`
+
+## Reproducible Baseline Snapshot
+
+Local baseline run (`python -m baselines.run_baseline --mode env --episodes 5 --seed 42`) produced:
+
+1. Easy
+   - Mean reward: `0.5432`
+   - Mean task score: `0.5474`
+   - Success rate: `0.0`
+2. Medium
+   - Mean reward: `0.5275`
+   - Mean task score: `0.3702`
+   - Success rate: `0.0`
+3. Hard
+   - Mean reward: `0.4944`
+   - Mean task score: `0.2907`
+   - Success rate: `0.0`
+
+These are non-trained heuristic baselines and are intended as reproducible reference points.
+
+## HF Space Deployment
+
+Container serves a persistent API on port `7860` using `uvicorn app:app`.
+
+Endpoints:
+
+1. `GET /` ping
+2. `GET /health` health check
+3. `POST /reset` reset environment
+4. `POST /step` step environment
+5. `GET /state` current full state
+
+Local smoke test:
+
+```bash
+python -m uvicorn app:app --host 127.0.0.1 --port 7860
+```
+
+## Docker
+
+Build:
+
+```bash
+docker build -t rescue-robot-openenv .
+```
+
+Run:
+
+```bash
+docker run --rm -p 7860:7860 rescue-robot-openenv
+```
+
+## Pre-Submission Validation
+
+Use helper script:
+
+```bash
+bash scripts/validate-submission.sh <your_space_url> .
+```
+
+It checks:
+
+1. Required files exist (`openenv.yaml`, `Dockerfile`, root `inference.py`).
+2. `openenv validate` (if CLI installed).
+3. `docker build` (if Docker installed).
+4. Space ping and reset endpoint responses.
+
+## Repository Layout
+
+1. `rescue_env/` core environment, world simulation, typed models, scoring, tasks.
+2. `baselines/` random/greedy/astar baseline agents and runner.
+3. `tests/` scoring and environment integration tests.
+4. `openenv.yaml` environment metadata.
+5. `inference.py` mandatory OpenAI-client baseline inference script.
+6. `app.py` live API service for HF deployment.
