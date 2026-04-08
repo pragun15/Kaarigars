@@ -11,8 +11,11 @@ REPO_DIR="${2:-.}"
 IMAGE_NAME="rescue-robot-openenv:local"
 
 if [[ -z "${PING_URL}" ]]; then
-  echo -e "${RED}Usage: ./scripts/validate-submission.sh <ping_url> [repo_dir]${NC}"
-  exit 2
+  echo -e "${YELLOW}[WARN] No ping URL provided; running in local-only mode.${NC}"
+fi
+
+if [[ "${LOCAL_CHECK_STRICT_AUTH:-0}" == "1" ]]; then
+  echo -e "${YELLOW}[WARN] LOCAL_CHECK_STRICT_AUTH=1 enabled; auth errors in inference output will fail local check.${NC}"
 fi
 
 pass() { echo -e "${GREEN}[PASS] $1${NC}"; }
@@ -24,7 +27,14 @@ cd "${REPO_DIR}" || fail "Cannot cd into repo_dir=${REPO_DIR}"
 [[ -f "openenv.yaml" ]] || fail "openenv.yaml missing"
 [[ -f "Dockerfile" ]] || fail "Dockerfile missing"
 [[ -f "inference.py" ]] || fail "inference.py missing at repository root"
+[[ -f "scripts/pre_submit_local_check.py" ]] || fail "scripts/pre_submit_local_check.py missing"
 pass "Required files exist"
+
+if python scripts/pre_submit_local_check.py; then
+  pass "local pre-submit validator passed"
+else
+  fail "local pre-submit validator failed"
+fi
 
 if command -v openenv >/dev/null 2>&1; then
   if openenv validate; then
@@ -33,7 +43,7 @@ if command -v openenv >/dev/null 2>&1; then
     fail "openenv validate failed"
   fi
 else
-  warn "openenv CLI not installed; skipping openenv validate"
+  fail "openenv command not found (install with: pip install openenv-core)"
 fi
 
 if command -v docker >/dev/null 2>&1; then
@@ -46,18 +56,22 @@ else
   warn "docker not installed; skipping docker build"
 fi
 
-if curl -fsS "${PING_URL}" >/dev/null; then
-  pass "Space ping URL responded 200"
-else
-  fail "Space ping URL did not respond with success"
-fi
+if [[ -n "${PING_URL}" ]]; then
+  if curl -fsS -X POST "${PING_URL}/reset" \
+    -H 'Content-Type: application/json' \
+    -d '{}' >/dev/null; then
+    pass "Space /reset responded 200"
+  else
+    fail "Space /reset did not respond with success"
+  fi
 
-if curl -fsS -X POST "${PING_URL}/reset" \
-  -H 'Content-Type: application/json' \
-  -d '{"difficulty":"easy","seed":42}' >/dev/null; then
-  pass "Space reset endpoint responded"
+  if curl -fsS "${PING_URL}" >/dev/null; then
+    pass "Space root endpoint responded 200"
+  else
+    fail "Space root endpoint did not respond with success"
+  fi
 else
-  fail "Space reset endpoint failed"
+  warn "Skipping remote Space ping/reset checks in local-only mode"
 fi
 
 if [[ -n "${HF_TOKEN:-}" && -n "${API_BASE_URL:-}" && -n "${MODEL_NAME:-}" ]]; then

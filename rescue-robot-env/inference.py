@@ -603,16 +603,27 @@ def _call_model(
     temperature: float,
     max_tokens: int,
 ) -> str:
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
+    request_payload: dict[str, Any] = {
+        "model": model,
+        "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        temperature=temperature,
-        max_tokens=max_tokens,
-        seed=seed,
-    )
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "seed": seed,
+    }
+
+    try:
+        response = client.chat.completions.create(**request_payload)
+    except Exception as exc:  # noqa: BLE001
+        err_text = str(exc).lower()
+        # Some OpenAI-compatible providers (including Gemini adapters) reject `seed`.
+        if "unknown name \"seed\"" not in err_text and "invalid json payload" not in err_text:
+            raise
+        request_payload.pop("seed", None)
+        response = client.chat.completions.create(**request_payload)
+
     content = response.choices[0].message.content
     return content if isinstance(content, str) else str(content)
 
@@ -849,8 +860,8 @@ def main() -> int:
     _load_dotenv_file(os.path.join(project_root, ".env"))
 
     benchmark_name = os.getenv("BENCHMARK", DEFAULT_BENCHMARK)
-    base_url = os.getenv("API_BASE_URL", DEFAULT_API_BASE_URL)
-    model_name = os.getenv("MODEL_NAME", DEFAULT_MODEL_NAME)
+    base_url = os.getenv("API_BASE_URL", "").strip()
+    model_name = os.getenv("MODEL_NAME", "").strip()
     max_steps = int(os.getenv("MAX_STEPS", str(DEFAULT_MAX_STEPS)))
     temperature = float(os.getenv("TEMPERATURE", str(DEFAULT_TEMPERATURE)))
     max_tokens = int(os.getenv("MAX_TOKENS", str(DEFAULT_MAX_TOKENS)))
@@ -858,10 +869,23 @@ def main() -> int:
     base_seed = int(os.getenv("BASE_SEED", str(DEFAULT_BASE_SEED)))
     memory_debug = os.getenv("MEMORY_DEBUG", "0").strip().lower() in {"1", "true", "yes", "on"}
 
-    hf_token = os.getenv("HF_TOKEN")
-    api_key = hf_token or os.getenv("API_KEY") or os.getenv("OPENAI_API_KEY")
+    if not base_url:
+        print("Missing required variable API_BASE_URL.", flush=True)
+        return 1
+
+    if not model_name:
+        print("Missing required variable MODEL_NAME.", flush=True)
+        return 1
+
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    hf_token = os.getenv("HF_TOKEN", "").strip()
+    if not hf_token:
+        print("Missing required variable HF_TOKEN.", flush=True)
+        return 1
+
+    api_key = openai_api_key or hf_token or os.getenv("API_KEY")
     if not api_key:
-        print("Missing credentials. Set HF_TOKEN (preferred) or API_KEY/OPENAI_API_KEY.", flush=True)
+        print("Missing credentials. Set OPENAI_API_KEY or API_KEY (HF_TOKEN is also required by submission).", flush=True)
         return 1
 
     client = OpenAI(api_key=api_key, base_url=base_url)

@@ -111,7 +111,14 @@ Reward and final-score modules:
 pip install -r requirements.txt
 ```
 
-3. Run tests:
+3. Ensure OpenEnv CLI is available:
+
+```bash
+pip install openenv-core
+openenv --version
+```
+
+4. Run tests:
 
 ```bash
 pytest -q tests/test_scoring.py tests/test_env_integration.py
@@ -124,6 +131,11 @@ The root `inference.py` consumes the required variables from submission instruct
 1. `API_BASE_URL`
 2. `MODEL_NAME`
 3. `HF_TOKEN`
+
+Optional compatibility aliases:
+
+4. `OPENAI_API_KEY`
+5. `API_KEY`
 
 Copy `.env.example` to `.env` and set values.
 
@@ -206,9 +218,10 @@ bash scripts/validate-submission.sh <your_space_url> .
 It checks:
 
 1. Required files exist (`openenv.yaml`, `Dockerfile`, root `inference.py`).
-2. `openenv validate` (if CLI installed).
+2. `openenv validate` (required; install with `pip install openenv-core`).
 3. `docker build` (if Docker installed).
-4. Space ping and reset endpoint responses.
+4. Space `POST /reset` response (`200`).
+5. Space root endpoint response (`200`).
 
 ## Repository Layout
 
