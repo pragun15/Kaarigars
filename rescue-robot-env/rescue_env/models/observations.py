@@ -65,3 +65,11 @@ class Observation(BaseModel):
     nearby_hazards: List[HazardObservation]
     time_remaining: float
     mission_progress: float
+    explored_zones: List[tuple[int, int]]
+    unexplored_zones: List[tuple[int, int]]
+    nearby_heat_signatures: List[ThermalSignature]
+    nearby_sounds: List[AcousticEvent]
+    battery_remaining: float
+    last_action_result: str
+    last_action_rejected: str | None = None
+    hint: str | None = None

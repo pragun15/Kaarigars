@@ -7,7 +7,6 @@ def test_env_step_returns_episode_stats() -> None:
     env = RescueEnvironment(difficulty="easy")
     _ = env.reset(seed=42)
 
-    # Baseline runner sends dict-style actions, so integration should support them.
     action = {
         "action_type": "scan_thermal",
         "parameters": {"duration": 1.0},

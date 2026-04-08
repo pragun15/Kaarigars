@@ -10,9 +10,10 @@ def build_hard_task() -> TaskSpec:
         description="Mass casualty rescue under severe hazards and sensor degradation.",
         time_limit_minutes=45.0,
         success_criteria={
-            "victims_rescued": 0.60,
-            "decision_score": 0.65,
-            "mission_completion": 0.70,
+            "victims_rescued": 0.75,
+            "decision_score": 0.75,
+            "mission_completion": 0.85,
+            "safety_score": 0.78,
         },
         environment_profile={
             "weather": "rain_mud",

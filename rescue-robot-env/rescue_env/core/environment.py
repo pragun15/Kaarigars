@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import random
 from typing import Any
 from uuid import uuid4
@@ -101,6 +102,12 @@ class RescueEnvironment:
         self._critical_gas_zone_entries = 0
         self._preventable_destruction_events = 0
         self._collisions_near_survivor = 0
+        self._last_action_result = "episode_reset"
+        self._last_action_rejected: str | None = None
+        self._last_hint = "Sweep nearby zones and use thermal/lidar to locate victims."
+        self._no_progress_steps = 0
+        self._last_move_target: tuple[float, float] | None = None
+        self._same_move_target_streak = 0
 
     def reset(self, seed: int | None = None) -> Observation:
         if seed is None:
@@ -134,6 +141,12 @@ class RescueEnvironment:
         self._critical_gas_zone_entries = 0
         self._preventable_destruction_events = 0
         self._collisions_near_survivor = 0
+        self._last_action_result = "episode_reset"
+        self._last_action_rejected = None
+        self._last_hint = "Sweep nearby zones and use thermal/lidar to locate victims."
+        self._no_progress_steps = 0
+        self._last_move_target = None
+        self._same_move_target_streak = 0
 
         self._mark_cell_visit(self.robot.position)
         self._last_episode_stats = self._build_episode_stats()
@@ -146,10 +159,15 @@ class RescueEnvironment:
         assert self.map_data is not None
 
         parsed_action = self._normalize_action(action)
-        previous_stats = self._last_episode_stats or self._build_episode_stats()
-
         prev_detected = self.metrics.victims_detected
         prev_rescued = self.metrics.victims_rescued
+        prev_visited = len(self._visited_cells)
+        prev_nearest_victim_distance = self._nearest_unrescued_victim_distance()
+        previous_stats = self._last_episode_stats or self._build_episode_stats()
+
+        parsed_action, rejection_reason, action_result = self._apply_action_guardrails(parsed_action)
+        self._last_action_rejected = rejection_reason
+        self._last_action_result = action_result
 
         had_critical_before = any(v.health == HealthStatus.CRITICAL and not v.rescued for v in self.victims)
         if parsed_action.type == ActionType.RESCUE_VICTIM:
@@ -201,11 +219,47 @@ class RescueEnvironment:
             self._preventable_destruction_events = 1
 
         current_stats = self._build_episode_stats()
-        reward = calculate_step_reward(previous_stats, current_stats, terminal=(done or truncated))
+        observation = self._build_observation()
+
+        dense_reward = self._dense_step_reward(
+            action=parsed_action,
+            observation=observation,
+            prev_detected=prev_detected,
+            prev_rescued=prev_rescued,
+            prev_visited=prev_visited,
+            prev_nearest_victim_distance=prev_nearest_victim_distance,
+            had_collision=result.collision,
+            rescued_victim_id=result.rescued_victim_id,
+            rejection_reason=rejection_reason,
+        )
+
+        shaped_reward = max(0.0, calculate_step_reward(previous_stats, current_stats, terminal=False))
+        reward = max(0.0, min(1.0, dense_reward + 0.35 * shaped_reward))
+
+        difficulty_factor = {
+            "easy": 1.0,
+            "medium": 0.92,
+            "hard": 0.82,
+        }.get(self.config.difficulty, 1.0)
+        reward *= difficulty_factor
+
+        progress_happened = (
+            self.metrics.victims_detected > prev_detected
+            or self.metrics.victims_rescued > prev_rescued
+            or len(self._visited_cells) > prev_visited
+            or dense_reward > 0.03
+        )
+        if progress_happened:
+            self._no_progress_steps = 0
+        else:
+            self._no_progress_steps += 1
+
         score_breakdown = calculate_final_reward(current_stats)
+        if done or truncated:
+            reward = max(0.0, min(1.0, reward + 0.15 * score_breakdown.final))
+
         self._last_episode_stats = current_stats
 
-        observation = self._build_observation()
         info = {
             "episode_id": self._episode_id,
             "difficulty": self.config.difficulty,
@@ -215,6 +269,11 @@ class RescueEnvironment:
             "penalties": score_breakdown.penalty_events,
             "reason": reason,
             "success": done and self.metrics.victims_rescued == len(self.victims),
+            "last_action_result": self._last_action_result,
+            "last_action_rejected": self._last_action_rejected,
+            "hint": self._last_hint,
+            "no_progress_steps": self._no_progress_steps,
+            "dense_reward": round(dense_reward, 4),
         }
         if done or truncated:
             info["task_grade"] = grade_episode_by_difficulty(self.config.difficulty, current_stats, score_breakdown).to_dict()
@@ -248,6 +307,10 @@ class RescueEnvironment:
 
         nearby_victims = self._nearby_victim_observations()
         nearby_hazards = self._nearby_hazard_observations()
+        explored_zones = self._sample_explored_zones(limit=12)
+        unexplored_zones = self._sample_unexplored_zones(limit=12)
+        hint = self._derive_hint(nearby_victims, nearby_hazards, unexplored_zones)
+        self._last_hint = hint
         time_remaining = max(0.0, self.profile["time_limit_minutes"] - self.metrics.time_elapsed)
         progress = self.metrics.victims_rescued / max(1, len(self.victims))
 
@@ -269,6 +332,14 @@ class RescueEnvironment:
             nearby_hazards=nearby_hazards,
             time_remaining=time_remaining,
             mission_progress=progress,
+            explored_zones=explored_zones,
+            unexplored_zones=unexplored_zones,
+            nearby_heat_signatures=thermal_signatures,
+            nearby_sounds=acoustic_events,
+            battery_remaining=self.robot.battery_level,
+            last_action_result=self._last_action_result,
+            last_action_rejected=self._last_action_rejected,
+            hint=hint,
         )
 
     def _nearby_victim_observations(self) -> list[VictimObservation]:
@@ -451,6 +522,237 @@ class RescueEnvironment:
         if cell in self._visited_cells:
             self._revisit_steps += 1
         self._visited_cells.add(cell)
+
+    def _apply_action_guardrails(self, action: Action) -> tuple[Action, str | None, str]:
+        assert self.robot is not None
+
+        scan_actions = {ActionType.SCAN_LIDAR, ActionType.SCAN_THERMAL, ActionType.SCAN_GAS, ActionType.LISTEN}
+        if action.type in scan_actions and self.robot.battery_level <= 10.0:
+            return IdleAction(duration=1.0), "low_battery_scan_blocked", "scan_blocked_low_battery"
+
+        if action.type == ActionType.RESCUE_VICTIM and isinstance(action, RescueAction):
+            if not self._is_victim_rescue_reachable(action.victim_id, max_distance=3.0):
+                nearest = self._nearest_unrescued_victim()
+                if nearest is not None:
+                    return (
+                        MoveAction(
+                            type=ActionType.MOVE,
+                            target_position=(nearest.position.x, nearest.position.y),
+                            speed=1.1,
+                        ),
+                        "rescue_without_nearby_victim",
+                        "rescue_blocked_move_to_nearest_victim",
+                    )
+                return ScanAction(type=ActionType.SCAN_THERMAL, direction=None, duration=1.0), "rescue_without_nearby_victim", "rescue_blocked_scan_thermal"
+
+        if action.type == ActionType.MOVE and isinstance(action, MoveAction):
+            target = (float(action.target_position[0]), float(action.target_position[1]))
+            if self._last_move_target is not None and self._distance(self._last_move_target, target) <= 0.6:
+                self._same_move_target_streak += 1
+            else:
+                self._same_move_target_streak = 1
+            self._last_move_target = target
+
+            if self._same_move_target_streak >= 3:
+                self._same_move_target_streak = 0
+                explore_target = self._next_exploration_target()
+                if explore_target is not None:
+                    return (
+                        MoveAction(type=ActionType.MOVE, target_position=explore_target, speed=1.2),
+                        "repeated_move_target",
+                        "repeated_move_blocked_forced_exploration",
+                    )
+                return IdleAction(duration=1.0), "repeated_move_target", "repeated_move_blocked"
+        else:
+            self._same_move_target_streak = 0
+            self._last_move_target = None
+
+        if self._no_progress_steps >= 4 and action.type in (scan_actions | {ActionType.IDLE}):
+            explore_target = self._next_exploration_target()
+            if explore_target is not None:
+                return (
+                    MoveAction(type=ActionType.MOVE, target_position=explore_target, speed=1.2),
+                    "no_progress_forced_exploration",
+                    "no_progress_forced_exploration",
+                )
+
+        return action, None, "action_applied"
+
+    def _dense_step_reward(
+        self,
+        action: Action,
+        observation: Observation,
+        prev_detected: int,
+        prev_rescued: int,
+        prev_visited: int,
+        prev_nearest_victim_distance: float | None,
+        had_collision: bool,
+        rescued_victim_id: str | None,
+        rejection_reason: str | None,
+    ) -> float:
+        dense = 0.0
+
+        if action.type == ActionType.MOVE:
+            if len(self._visited_cells) > prev_visited:
+                dense += 0.05
+
+            nearest_after = self._nearest_unrescued_victim_distance()
+            if (
+                prev_nearest_victim_distance is not None
+                and nearest_after is not None
+                and nearest_after < (prev_nearest_victim_distance - 0.25)
+            ):
+                dense += 0.03
+
+            if len(self._visited_cells) == prev_visited:
+                dense -= 0.02
+
+        if action.type == ActionType.IDLE:
+            dense -= 0.02
+
+        if action.type == ActionType.SCAN_LIDAR:
+            dense += 0.08 if len(self._visited_cells) > prev_visited else 0.0
+
+        if action.type == ActionType.SCAN_THERMAL:
+            new_detections = max(0, self.metrics.victims_detected - prev_detected)
+            dense += 0.10 if new_detections > 0 else 0.02
+
+        if action.type == ActionType.SCAN_GAS:
+            gas = observation.sensors.gas_levels
+            hazardous = gas.co > 30.0 or gas.ch4 > 8.0 or gas.h2s > 5.0
+            dense += 0.15 if hazardous else 0.02
+
+        if action.type == ActionType.LISTEN:
+            dense += 0.12 if observation.nearby_sounds else 0.02
+
+        if action.type == ActionType.RESCUE_VICTIM:
+            rescued_delta = max(0, self.metrics.victims_rescued - prev_rescued)
+            if rescued_delta > 0:
+                dense += 0.20
+                if rescued_victim_id is not None:
+                    rescued = next((v for v in self.victims if v.victim_id == rescued_victim_id), None)
+                    if rescued is not None and rescued.health == HealthStatus.CRITICAL:
+                        dense += 0.10
+            else:
+                dense -= 0.02
+
+        if action.type == ActionType.FLAG_HAZARD:
+            dense += 0.15 if observation.nearby_hazards else 0.01
+
+        if had_collision:
+            dense -= 0.05
+
+        if rejection_reason is not None:
+            dense -= 0.05
+
+        return max(0.0, min(1.0, dense))
+
+    def _sample_explored_zones(self, limit: int = 12) -> list[tuple[int, int]]:
+        assert self.robot is not None
+        if not self._visited_cells:
+            return []
+
+        rx = self.robot.position.x
+        ry = self.robot.position.y
+        ranked = sorted(
+            self._visited_cells,
+            key=lambda cell: self._distance((rx, ry), (float(cell[0]), float(cell[1]))),
+        )
+        return [(int(c[0]), int(c[1])) for c in ranked[:limit]]
+
+    def _sample_unexplored_zones(self, limit: int = 12) -> list[tuple[int, int]]:
+        assert self.map_data is not None
+        assert self.robot is not None
+
+        candidates: list[tuple[float, tuple[int, int]]] = []
+        rx = self.robot.position.x
+        ry = self.robot.position.y
+
+        for y in range(self.map_data.height):
+            for x in range(self.map_data.width):
+                if self.map_data.occupancy[y][x] == 1:
+                    continue
+                cell = (x, y)
+                if cell in self._visited_cells:
+                    continue
+                distance = self._distance((rx, ry), (float(x), float(y)))
+                candidates.append((distance, cell))
+
+        candidates.sort(key=lambda item: item[0])
+        return [(int(c[1][0]), int(c[1][1])) for c in candidates[:limit]]
+
+    def _next_exploration_target(self) -> tuple[float, float] | None:
+        assert self.robot is not None
+        unexplored = self._sample_unexplored_zones(limit=20)
+        if not unexplored:
+            return None
+
+        rx = self.robot.position.x
+        ry = self.robot.position.y
+        for cell in unexplored:
+            if self._distance((rx, ry), (float(cell[0]), float(cell[1]))) > 1.0:
+                return float(cell[0]), float(cell[1])
+        first = unexplored[0]
+        return float(first[0]), float(first[1])
+
+    def _derive_hint(
+        self,
+        nearby_victims: list[VictimObservation],
+        nearby_hazards: list[HazardObservation],
+        unexplored_zones: list[tuple[int, int]],
+    ) -> str:
+        if self._last_action_rejected is not None:
+            return f"Action was rejected ({self._last_action_rejected}); explore a different frontier cell."
+
+        critical = [v for v in nearby_victims if v.health == HealthStatus.CRITICAL]
+        if critical:
+            target = critical[0]
+            return f"Critical victim detected near ({target.position.x:.1f}, {target.position.y:.1f}); prioritize rescue."
+
+        if nearby_victims:
+            target = nearby_victims[0]
+            return f"Victim signal nearby ({target.position.x:.1f}, {target.position.y:.1f}); move closer then rescue."
+
+        if nearby_hazards:
+            hazard = max(nearby_hazards, key=lambda h: h.severity)
+            return f"Hazard detected ({hazard.hazard_type}); consider flagging before advancing."
+
+        if unexplored_zones:
+            zone = unexplored_zones[0]
+            return f"No nearby victims; explore unexplored zone ({zone[0]}, {zone[1]})."
+
+        if self._no_progress_steps >= 3:
+            return "No progress for multiple steps; switch to thermal scan then move to a new zone."
+
+        return "Continue mapping and use thermal/acoustic scans to discover survivors."
+
+    def _nearest_unrescued_victim(self) -> Victim | None:
+        assert self.robot is not None
+        candidates = [v for v in self.victims if not v.rescued]
+        if not candidates:
+            return None
+        return min(
+            candidates,
+            key=lambda v: self._distance((self.robot.position.x, self.robot.position.y), (v.position.x, v.position.y)),
+        )
+
+    def _nearest_unrescued_victim_distance(self) -> float | None:
+        nearest = self._nearest_unrescued_victim()
+        if nearest is None or self.robot is None:
+            return None
+        return self._distance((self.robot.position.x, self.robot.position.y), (nearest.position.x, nearest.position.y))
+
+    def _is_victim_rescue_reachable(self, victim_id: str, max_distance: float) -> bool:
+        assert self.robot is not None
+        victim = next((v for v in self.victims if v.victim_id == victim_id and not v.rescued), None)
+        if victim is None:
+            return False
+        dist = self._distance((self.robot.position.x, self.robot.position.y), (victim.position.x, victim.position.y))
+        return dist <= max_distance
+
+    @staticmethod
+    def _distance(a: tuple[float, float], b: tuple[float, float]) -> float:
+        return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2)
 
     def _is_near_any_unrescued_victim(self, distance_threshold: float) -> bool:
         assert self.robot is not None
