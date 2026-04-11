@@ -23,6 +23,9 @@ def test_env_step_returns_episode_stats() -> None:
     assert isinstance(info["episode_stats"], dict)
     assert "score_breakdown" in info
     assert isinstance(info["score_breakdown"], dict)
+    assert "reward_model" in info
+    assert isinstance(info["reward_model"], dict)
+    assert 0.0 <= float(info["reward_model"].get("value", -1.0)) <= 1.0
 
 
 def test_env_state_available_after_reset() -> None:

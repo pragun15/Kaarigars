@@ -25,6 +25,7 @@ from rescue_env.models.observations import (
     SensorReadings,
     VictimObservation,
 )
+from rescue_env.models.reward import Reward
 from rescue_env.models.robot import Position, RobotSpecs, RobotState
 from rescue_env.models.state import HazardZone, MapData, MissionMetrics, StateSnapshot
 from rescue_env.models.victim import HealthStatus, Victim
@@ -104,6 +105,7 @@ class RescueEnvironment:
         self._collisions_near_survivor = 0
         self._last_action_result = "episode_reset"
         self._last_action_rejected: str | None = None
+        self._last_action_error: str | None = None
         self._last_hint = "Sweep nearby zones and use thermal/lidar to locate victims."
         self._no_progress_steps = 0
         self._last_move_target: tuple[float, float] | None = None
@@ -143,6 +145,7 @@ class RescueEnvironment:
         self._collisions_near_survivor = 0
         self._last_action_result = "episode_reset"
         self._last_action_rejected = None
+        self._last_action_error = None
         self._last_hint = "Sweep nearby zones and use thermal/lidar to locate victims."
         self._no_progress_steps = 0
         self._last_move_target = None
@@ -167,6 +170,7 @@ class RescueEnvironment:
 
         parsed_action, rejection_reason, action_result = self._apply_action_guardrails(parsed_action)
         self._last_action_rejected = rejection_reason
+        self._last_action_error = rejection_reason
         self._last_action_result = action_result
 
         had_critical_before = any(v.health == HealthStatus.CRITICAL and not v.rescued for v in self.victims)
@@ -255,8 +259,17 @@ class RescueEnvironment:
             self._no_progress_steps += 1
 
         score_breakdown = calculate_final_reward(current_stats)
+        terminal_component = 0.0
         if done or truncated:
-            reward = max(0.0, min(1.0, reward + 0.15 * score_breakdown.final))
+            terminal_component = max(0.0, min(1.0, 0.15 * score_breakdown.final))
+            reward = max(0.0, min(1.0, reward + terminal_component))
+
+        reward_model = Reward(
+            value=max(0.0, min(1.0, reward)),
+            dense_component=max(0.0, min(1.0, dense_reward)),
+            shaped_component=max(0.0, min(1.0, 0.35 * shaped_reward)),
+            terminal_component=terminal_component,
+        )
 
         self._last_episode_stats = current_stats
 
@@ -271,13 +284,15 @@ class RescueEnvironment:
             "success": done and self.metrics.victims_rescued == len(self.victims),
             "last_action_result": self._last_action_result,
             "last_action_rejected": self._last_action_rejected,
+            "last_action_error": self._last_action_error,
             "hint": self._last_hint,
             "no_progress_steps": self._no_progress_steps,
             "dense_reward": round(dense_reward, 4),
+            "reward_model": reward_model.model_dump(),
         }
         if done or truncated:
             info["task_grade"] = grade_episode_by_difficulty(self.config.difficulty, current_stats, score_breakdown).to_dict()
-        return observation, reward, done, truncated, info
+        return observation, reward_model.value, done, truncated, info
 
     def state(self) -> StateSnapshot:
         self._require_initialized()

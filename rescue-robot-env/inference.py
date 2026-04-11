@@ -176,6 +176,10 @@ def log_end(success: bool, steps: int, score: float, rewards: list[float]) -> No
     print(f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}", flush=True)
 
 
+def _stderr(message: str) -> None:
+    print(message, file=sys.stderr, flush=True)
+
+
 def _clip01(value: float) -> float:
     return max(0.0, min(1.0, float(value)))
 
@@ -820,15 +824,18 @@ def _run_one_task(
 
             action_repr = _action_repr(action)
             done_flag = bool(done or truncated)
+            env_action_error = None
+            if isinstance(info, dict):
+                env_action_error = info.get("last_action_error") or info.get("last_action_rejected")
             log_step(
                 step=step_index,
                 action=action_repr,
                 reward=reward_for_log,
                 done=done_flag,
-                error=model_error,
+                error=env_action_error or model_error,
             )
             if memory_debug:
-                print(f"[MEMORY] {json.dumps(_memory_debug_snapshot(memory), separators=(',', ':'))}", flush=True)
+                _stderr(f"[MEMORY] {json.dumps(_memory_debug_snapshot(memory), separators=(',', ':'))}")
 
             history.append(action_repr)
             memory.action_history.append(action_repr)
@@ -879,22 +886,22 @@ def main() -> int:
     memory_debug = os.getenv("MEMORY_DEBUG", "0").strip().lower() in {"1", "true", "yes", "on"}
 
     if not base_url:
-        print("Missing required variable API_BASE_URL.", flush=True)
+        _stderr("Missing required variable API_BASE_URL.")
         return 1
 
     if not model_name:
-        print("Missing required variable MODEL_NAME.", flush=True)
+        _stderr("Missing required variable MODEL_NAME.")
         return 1
 
     openai_api_key = os.getenv("OPENAI_API_KEY")
     hf_token = os.getenv("HF_TOKEN", "").strip()
     if not hf_token:
-        print("Missing required variable HF_TOKEN.", flush=True)
+        _stderr("Missing required variable HF_TOKEN.")
         return 1
 
     api_key = openai_api_key or hf_token or os.getenv("API_KEY")
     if not api_key:
-        print("Missing credentials. Set OPENAI_API_KEY or API_KEY (HF_TOKEN is also required by submission).", flush=True)
+        _stderr("Missing credentials. Set OPENAI_API_KEY or API_KEY (HF_TOKEN is also required by submission).")
         return 1
 
     client = OpenAI(api_key=api_key, base_url=base_url)
@@ -922,7 +929,7 @@ def main() -> int:
         all_scores.append(score)
 
     if not all_scores:
-        print("No tasks selected. Set TASK_NAME to all/easy/medium/hard or a task name.", flush=True)
+        _stderr("No tasks selected. Set TASK_NAME to all/easy/medium/hard or a task name.")
         return 1
 
     return 0
