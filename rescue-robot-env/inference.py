@@ -659,11 +659,12 @@ def _run_one_task(
     log_start(task_name, benchmark_name, model_name)
 
     last_reward = 0.0
-    for step_index in range(1, max_steps + 1):
-        obs_dict = observation.model_dump() if hasattr(observation, "model_dump") else dict(observation)
-        _update_frontier_cache(memory, obs_dict)
-        nearest_dist = _nearest_victim_distance(obs_dict)
-        failed_ids = _recent_failed_victim_ids_from_memory(memory, limit=5)
+    try:
+        for step_index in range(1, max_steps + 1):
+            obs_dict = observation.model_dump() if hasattr(observation, "model_dump") else dict(observation)
+            _update_frontier_cache(memory, obs_dict)
+            nearest_dist = _nearest_victim_distance(obs_dict)
+            failed_ids = _recent_failed_victim_ids_from_memory(memory, limit=5)
         user_prompt = _build_user_prompt(
             step_index,
             difficulty,
@@ -835,23 +836,31 @@ def _run_one_task(
         if done_flag:
             break
 
-    task_grade = info.get("task_grade") if isinstance(info, dict) else None
-    score = 0.0
-    success = False
+    finally:
+        task_grade = info.get("task_grade") if isinstance(info, dict) else None
+        score = 0.0
+        success = False
 
-    if isinstance(task_grade, dict):
-        score = float(task_grade.get("task_score", task_grade.get("reward", 0.0)))
-        success = bool(task_grade.get("success", False))
-    else:
-        breakdown = info.get("score_breakdown") if isinstance(info, dict) else None
-        if isinstance(breakdown, dict):
-            score = float(breakdown.get("final", 0.0))
+        if isinstance(task_grade, dict):
+            score = float(task_grade.get("task_score", task_grade.get("reward", 0.0)))
+            success = bool(task_grade.get("success", False))
+        else:
+            breakdown = info.get("score_breakdown") if isinstance(info, dict) else None
+            if isinstance(breakdown, dict):
+                score = float(breakdown.get("final", 0.0))
 
-    score = _clip01(score)
-    if not success:
-        success = score >= success_threshold
+        score = _clip01(score)
+        if not success:
+            success = score >= success_threshold
 
-    log_end(success=success, steps=len(rewards), score=score, rewards=rewards)
+        try:
+            if hasattr(env, "close"):
+                env.close()
+        except BaseException:
+            pass
+
+        log_end(success=success, steps=len(rewards), score=score, rewards=rewards)
+    
     return score
 
 
@@ -860,8 +869,8 @@ def main() -> int:
     _load_dotenv_file(os.path.join(project_root, ".env"))
 
     benchmark_name = os.getenv("BENCHMARK", DEFAULT_BENCHMARK)
-    base_url = os.getenv("API_BASE_URL", "").strip()
-    model_name = os.getenv("MODEL_NAME", "").strip()
+    base_url = os.getenv("API_BASE_URL", DEFAULT_API_BASE_URL).strip()
+    model_name = os.getenv("MODEL_NAME", DEFAULT_MODEL_NAME).strip()
     max_steps = int(os.getenv("MAX_STEPS", str(DEFAULT_MAX_STEPS)))
     temperature = float(os.getenv("TEMPERATURE", str(DEFAULT_TEMPERATURE)))
     max_tokens = int(os.getenv("MAX_TOKENS", str(DEFAULT_MAX_TOKENS)))
