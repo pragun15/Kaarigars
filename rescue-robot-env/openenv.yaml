@@ -7,7 +7,7 @@ description: |
 
 author: Team Kaarigars
 license: MIT
-homepage: https://huggingface.co/spaces/your-org/rescue-robot-env
+homepage: https://huggingface.co/spaces/Kaarigars/rescue-robot-earthquake-v1
 
 environment:
   class: rescue_env.core.environment.RescueEnvironment
