@@ -1,25 +1,53 @@
-# Rescue Robot OpenEnv (Skeleton)
+# Kaarigars OpenEnv Submission Repository
 
-This repository now includes a deterministic, typed, OpenEnv-style environment shell for earthquake search and rescue.
+This repository contains Team Kaarigars assets for the OpenEnv Round 1 hackathon.
 
-## Implemented
+## Submission Root
 
-- Project and package skeleton under `rescue_env/`
-- Typed models for actions, observations, state, robot, and victims
-- Environment API shell with `reset()`, `step()`, and `state()`
-- Deterministic seeding by episode
-- World simulation basics:
-  - map generation
-  - debris enrichment
-  - hazard generation
-  - victim generation with priority scores
-  - movement and collision physics
-- Robot execution path:
-  - action controller
-  - battery drain model
-  - LiDAR, thermal, gas, acoustic, IMU hooks
+The actual environment project root is:
 
-## Notes
+- `rescue-robot-env/`
 
-- No virtual environment was created or modified.
-- This code is ready to be wired into your existing virtual environment once it is available.
+Do not submit from the parent folder. All required submission files are intentionally at `rescue-robot-env/` root.
+
+## What Is Inside
+
+- `rescue-robot-env/` - final OpenEnv environment project
+- `Workflow.md` - architecture and implementation notes
+- `CONTEXT_DOCUMENT.txt` - planning/context notes
+
+## Required Files (Inside `rescue-robot-env/`)
+
+- `openenv.yaml`
+- `inference.py`
+- `Dockerfile`
+- `README.md`
+- `pyproject.toml`
+
+## Quick Validation
+
+From `rescue-robot-env/`:
+
+```bash
+openenv validate
+pytest -q tests/test_scoring.py tests/test_env_integration.py
+python scripts/pre_submit_local_check.py
+```
+
+## Full Pre-Submission Validator
+
+```bash
+bash scripts/validate-submission.sh <space_runtime_url> .
+```
+
+Example runtime URL format:
+
+```text
+https://<username>-<space-name>.hf.space
+```
+
+## Final Submission Notes
+
+- Keep current file structure unchanged.
+- Keep required files at `rescue-robot-env/` root.
+- Final platform submission should be done by the team lead account.
