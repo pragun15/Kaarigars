@@ -1,32 +1,51 @@
-# Kaarigars OpenEnv Submission Repository
+# Kaarigars - OpenEnv Search and Rescue
 
-This repository contains Team Kaarigars assets for the OpenEnv Round 1 hackathon.
+Professional project repository for Team Kaarigars' OpenEnv Round 1 submission.
 
-## Submission Root
+## Overview
 
-The actual environment project root is:
+Kaarigars models a real-world earthquake search-and-rescue scenario as an OpenEnv-compatible environment. The project is designed for agent training and evaluation with typed interfaces, deterministic grading, progressive task difficulty, and deployment-ready infrastructure.
 
-- `rescue-robot-env/`
+## Repository Layout
 
-Do not submit from the parent folder. All required submission files are intentionally at `rescue-robot-env/` root.
+This repository uses a mono-repo style layout:
 
-## What Is Inside
+- Kaarigars/ (main repository)
+- Kaarigars/rescue-robot-env/ (submission project root)
 
-- `rescue-robot-env/` - final OpenEnv environment project
-- `Workflow.md` - architecture and implementation notes
-- `CONTEXT_DOCUMENT.txt` - planning/context notes
+Submission-critical files are located at the root of Kaarigars/rescue-robot-env.
 
-## Required Files (Inside `rescue-robot-env/`)
+## Key Contents
 
-- `openenv.yaml`
-- `inference.py`
-- `Dockerfile`
-- `README.md`
-- `pyproject.toml`
+- Kaarigars/rescue-robot-env - Complete OpenEnv environment project
+- Kaarigars/Workflow.md - Architecture and implementation documentation
+- Kaarigars/CONTEXT_DOCUMENT.txt - Project context notes
 
-## Quick Validation
+## Submission Project (rescue-robot-env)
 
-From `rescue-robot-env/`:
+Primary deliverables in the submission root:
+
+- openenv.yaml
+- inference.py
+- Dockerfile
+- README.md
+- pyproject.toml
+
+Core package and supporting modules:
+
+- rescue_env/ (environment core, models, tasks, scoring, world simulation)
+- tests/ (integration and scoring tests)
+- scripts/ (local checks and pre-submission validator)
+
+## Local Setup
+
+Run all commands from Kaarigars/rescue-robot-env.
+
+```bash
+pip install -r requirements.txt
+```
+
+## Quality and Compliance Checks
 
 ```bash
 openenv validate
@@ -34,20 +53,20 @@ pytest -q tests/test_scoring.py tests/test_env_integration.py
 python scripts/pre_submit_local_check.py
 ```
 
-## Full Pre-Submission Validator
+## Deployment Validation
 
 ```bash
 bash scripts/validate-submission.sh <space_runtime_url> .
 ```
 
-Example runtime URL format:
+Runtime URL format:
 
 ```text
 https://<username>-<space-name>.hf.space
 ```
 
-## Final Submission Notes
+## Notes for Submission
 
-- Keep current file structure unchanged.
-- Keep required files at `rescue-robot-env/` root.
-- Final platform submission should be done by the team lead account.
+- Keep Kaarigars/rescue-robot-env as the submission root.
+- Keep required submission files at that root level.
+- Final platform submission is performed by the team lead account.
