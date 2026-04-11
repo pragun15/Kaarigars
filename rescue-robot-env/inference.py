@@ -665,176 +665,176 @@ def _run_one_task(
             _update_frontier_cache(memory, obs_dict)
             nearest_dist = _nearest_victim_distance(obs_dict)
             failed_ids = _recent_failed_victim_ids_from_memory(memory, limit=5)
-        user_prompt = _build_user_prompt(
-            step_index,
-            difficulty,
-            task_name,
-            obs_dict,
-            last_reward,
-            history,
-            failed_victim_ids=failed_ids,
-            no_progress_counter=memory.no_progress_steps,
-            nearest_victim_distance=nearest_dist,
-            memory=memory,
-        )
-
-        model_error: Optional[str] = None
-        use_fallback_policy = False
-        try:
-            response_text = _call_model(
-                client=client,
-                model=model_name,
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                seed=seed + step_index,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-            action = _normalize_action(_extract_json_object(response_text))
-            if action["action_type"] == "idle" and "idle" not in response_text.lower():
-                model_error = "invalid_json_fallback_idle"
-                use_fallback_policy = True
-        except Exception as exc:  # noqa: BLE001
-            model_error = _sanitize_error(str(exc))
-            action = {"action_type": "idle", "parameters": {}}
-            use_fallback_policy = True
-
-        if memory.no_progress_steps >= NO_PROGRESS_FALLBACK_TRIGGER:
-            use_fallback_policy = True
-
-        if use_fallback_policy:
-            action = _fallback_policy_action(
-                observation=obs_dict,
-                fallback_stage=memory.fallback_stage,
-                step_index=step_index,
+            user_prompt = _build_user_prompt(
+                step_index,
+                difficulty,
+                task_name,
+                obs_dict,
+                last_reward,
+                history,
+                failed_victim_ids=failed_ids,
                 no_progress_counter=memory.no_progress_steps,
+                nearest_victim_distance=nearest_dist,
+                memory=memory,
             )
-            memory.fallback_stage += 1
-            model_error = _append_error(model_error, "fallback_policy_applied")
 
-        action, guardrail_reason = _apply_guardrails(
-            action=action,
-            observation=obs_dict,
-            no_progress_counter=memory.no_progress_steps,
-            memory=memory,
-            step_index=step_index,
-            history=history,
-        )
-        if guardrail_reason:
-            model_error = _append_error(model_error, guardrail_reason)
+            model_error: Optional[str] = None
+            use_fallback_policy = False
+            try:
+                response_text = _call_model(
+                    client=client,
+                    model=model_name,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    seed=seed + step_index,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                action = _normalize_action(_extract_json_object(response_text))
+                if action["action_type"] == "idle" and "idle" not in response_text.lower():
+                    model_error = "invalid_json_fallback_idle"
+                    use_fallback_policy = True
+            except Exception as exc:  # noqa: BLE001
+                model_error = _sanitize_error(str(exc))
+                action = {"action_type": "idle", "parameters": {}}
+                use_fallback_policy = True
 
-        if action.get("action_type") == "move":
-            params = action.get("parameters", {}) if isinstance(action.get("parameters"), dict) else {}
-            move_target = _extract_xy(params.get("target_position"))
-            if move_target is not None:
-                if memory.last_move_target is not None and _distance(memory.last_move_target, move_target) < 0.5:
-                    memory.same_move_target_streak += 1
+            if memory.no_progress_steps >= NO_PROGRESS_FALLBACK_TRIGGER:
+                use_fallback_policy = True
+
+            if use_fallback_policy:
+                action = _fallback_policy_action(
+                    observation=obs_dict,
+                    fallback_stage=memory.fallback_stage,
+                    step_index=step_index,
+                    no_progress_counter=memory.no_progress_steps,
+                )
+                memory.fallback_stage += 1
+                model_error = _append_error(model_error, "fallback_policy_applied")
+
+            action, guardrail_reason = _apply_guardrails(
+                action=action,
+                observation=obs_dict,
+                no_progress_counter=memory.no_progress_steps,
+                memory=memory,
+                step_index=step_index,
+                history=history,
+            )
+            if guardrail_reason:
+                model_error = _append_error(model_error, guardrail_reason)
+
+            if action.get("action_type") == "move":
+                params = action.get("parameters", {}) if isinstance(action.get("parameters"), dict) else {}
+                move_target = _extract_xy(params.get("target_position"))
+                if move_target is not None:
+                    if memory.last_move_target is not None and _distance(memory.last_move_target, move_target) < 0.5:
+                        memory.same_move_target_streak += 1
+                    else:
+                        memory.same_move_target_streak = 1
+                    memory.last_move_target = move_target
                 else:
-                    memory.same_move_target_streak = 1
-                memory.last_move_target = move_target
+                    memory.same_move_target_streak = 0
+                    memory.last_move_target = None
+
+                if memory.same_move_target_streak >= 3:
+                    action = _exploration_move_action(observation=obs_dict, step_index=step_index, no_progress_counter=max(3, memory.no_progress_steps))
+                    model_error = _append_error(model_error, "guardrail_repeated_move_target")
+                    memory.same_move_target_streak = 0
+                    memory.last_move_target = None
             else:
                 memory.same_move_target_streak = 0
                 memory.last_move_target = None
 
-            if memory.same_move_target_streak >= 3:
-                action = _exploration_move_action(observation=obs_dict, step_index=step_index, no_progress_counter=max(3, memory.no_progress_steps))
-                model_error = _append_error(model_error, "guardrail_repeated_move_target")
-                memory.same_move_target_streak = 0
-                memory.last_move_target = None
-        else:
-            memory.same_move_target_streak = 0
-            memory.last_move_target = None
+            done = False
+            truncated = False
+            reward = 0.0
 
-        done = False
-        truncated = False
-        reward = 0.0
+            rescued_before = memory.victims_rescued_prev
+            detected_before = memory.victims_detected_prev
+            mission_before = memory.mission_progress_prev
 
-        rescued_before = memory.victims_rescued_prev
-        detected_before = memory.victims_detected_prev
-        mission_before = memory.mission_progress_prev
+            target_victim_id = None
+            target_victim_position = None
+            if action.get("action_type") == "rescue_victim":
+                params = action.get("parameters", {}) if isinstance(action.get("parameters"), dict) else {}
+                target_victim_id = str(params.get("victim_id", "unknown"))
+                victims_now = _nearby_victim_entries(obs_dict)
+                target_entry = next((item for item in victims_now if item["victim_id"] == target_victim_id), None)
+                if target_entry is not None:
+                    target_victim_position = target_entry["position"]
+                    _record_victim_sighting(memory, target_victim_id, target_victim_position, step_index)
 
-        target_victim_id = None
-        target_victim_position = None
-        if action.get("action_type") == "rescue_victim":
-            params = action.get("parameters", {}) if isinstance(action.get("parameters"), dict) else {}
-            target_victim_id = str(params.get("victim_id", "unknown"))
-            victims_now = _nearby_victim_entries(obs_dict)
-            target_entry = next((item for item in victims_now if item["victim_id"] == target_victim_id), None)
-            if target_entry is not None:
-                target_victim_position = target_entry["position"]
-                _record_victim_sighting(memory, target_victim_id, target_victim_position, step_index)
+            try:
+                observation, reward, done, truncated, info = env.step(action)
+            except Exception as exc:  # noqa: BLE001
+                model_error = _sanitize_error(f"step_error:{exc}")
+                fallback = _fallback_policy_action(
+                    observation=obs_dict,
+                    fallback_stage=memory.fallback_stage,
+                    step_index=step_index,
+                    no_progress_counter=memory.no_progress_steps,
+                )
+                memory.fallback_stage += 1
+                observation, reward, done, truncated, info = env.step(fallback)
+                action = fallback
+                model_error = _append_error(model_error, "fallback_policy_after_step_error")
 
-        try:
-            observation, reward, done, truncated, info = env.step(action)
-        except Exception as exc:  # noqa: BLE001
-            model_error = _sanitize_error(f"step_error:{exc}")
-            fallback = _fallback_policy_action(
-                observation=obs_dict,
-                fallback_stage=memory.fallback_stage,
-                step_index=step_index,
-                no_progress_counter=memory.no_progress_steps,
+            reward_for_log = _clip01(reward)
+            rewards.append(reward_for_log)
+            last_reward = reward_for_log
+
+            metrics_payload = info.get("metrics", {}) if isinstance(info, dict) else {}
+            if isinstance(metrics_payload, dict):
+                victims_detected_after = int(metrics_payload.get("victims_detected", detected_before) or detected_before)
+                victims_rescued_after = int(metrics_payload.get("victims_rescued", rescued_before) or rescued_before)
+            else:
+                victims_detected_after = detected_before
+                victims_rescued_after = rescued_before
+
+            obs_after_dict = observation.model_dump() if hasattr(observation, "model_dump") else dict(observation)
+            try:
+                mission_after = float(obs_after_dict.get("mission_progress", mission_before) or mission_before)
+            except (TypeError, ValueError):
+                mission_after = mission_before
+
+            progress_happened = (
+                victims_rescued_after > rescued_before
+                or victims_detected_after > detected_before
+                or mission_after > (mission_before + 1e-6)
+                or reward_for_log > 0.0
             )
-            memory.fallback_stage += 1
-            observation, reward, done, truncated, info = env.step(fallback)
-            action = fallback
-            model_error = _append_error(model_error, "fallback_policy_after_step_error")
 
-        reward_for_log = _clip01(reward)
-        rewards.append(reward_for_log)
-        last_reward = reward_for_log
+            if progress_happened:
+                memory.no_progress_steps = 0
+            else:
+                memory.no_progress_steps += 1
 
-        metrics_payload = info.get("metrics", {}) if isinstance(info, dict) else {}
-        if isinstance(metrics_payload, dict):
-            victims_detected_after = int(metrics_payload.get("victims_detected", detected_before) or detected_before)
-            victims_rescued_after = int(metrics_payload.get("victims_rescued", rescued_before) or rescued_before)
-        else:
-            victims_detected_after = detected_before
-            victims_rescued_after = rescued_before
+            memory.victims_detected_prev = victims_detected_after
+            memory.victims_rescued_prev = victims_rescued_after
+            memory.mission_progress_prev = mission_after
 
-        obs_after_dict = observation.model_dump() if hasattr(observation, "model_dump") else dict(observation)
-        try:
-            mission_after = float(obs_after_dict.get("mission_progress", mission_before) or mission_before)
-        except (TypeError, ValueError):
-            mission_after = mission_before
+            if action.get("action_type") == "rescue_victim" and target_victim_id is not None:
+                rescue_succeeded = victims_rescued_after > rescued_before
+                _record_victim_sighting(memory, target_victim_id, target_victim_position, step_index)
+                _record_rescue_outcome(memory, target_victim_id, rescue_succeeded, step_index)
 
-        progress_happened = (
-            victims_rescued_after > rescued_before
-            or victims_detected_after > detected_before
-            or mission_after > (mission_before + 1e-6)
-            or reward_for_log > 0.0
-        )
+            action_repr = _action_repr(action)
+            done_flag = bool(done or truncated)
+            log_step(
+                step=step_index,
+                action=action_repr,
+                reward=reward_for_log,
+                done=done_flag,
+                error=model_error,
+            )
+            if memory_debug:
+                print(f"[MEMORY] {json.dumps(_memory_debug_snapshot(memory), separators=(',', ':'))}", flush=True)
 
-        if progress_happened:
-            memory.no_progress_steps = 0
-        else:
-            memory.no_progress_steps += 1
+            history.append(action_repr)
+            memory.action_history.append(action_repr)
 
-        memory.victims_detected_prev = victims_detected_after
-        memory.victims_rescued_prev = victims_rescued_after
-        memory.mission_progress_prev = mission_after
-
-        if action.get("action_type") == "rescue_victim" and target_victim_id is not None:
-            rescue_succeeded = victims_rescued_after > rescued_before
-            _record_victim_sighting(memory, target_victim_id, target_victim_position, step_index)
-            _record_rescue_outcome(memory, target_victim_id, rescue_succeeded, step_index)
-
-        action_repr = _action_repr(action)
-        done_flag = bool(done or truncated)
-        log_step(
-            step=step_index,
-            action=action_repr,
-            reward=reward_for_log,
-            done=done_flag,
-            error=model_error,
-        )
-        if memory_debug:
-            print(f"[MEMORY] {json.dumps(_memory_debug_snapshot(memory), separators=(',', ':'))}", flush=True)
-
-        history.append(action_repr)
-        memory.action_history.append(action_repr)
-
-        if done_flag:
-            break
+            if done_flag:
+                break
 
     finally:
         task_grade = info.get("task_grade") if isinstance(info, dict) else None
