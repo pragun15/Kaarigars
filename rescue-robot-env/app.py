@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from rescue_env.core.environment import RescueEnvironment
@@ -14,7 +14,7 @@ class ResetRequest(BaseModel):
 
 
 class StepRequest(BaseModel):
-    action: dict[str, Any]
+    action: dict[str, Any] | None = None
 
 
 app = FastAPI(title="Rescue Robot OpenEnv Service", version="0.1.0")
@@ -54,14 +54,16 @@ def health() -> dict[str, str]:
 
 @app.post("/reset")
 @app.post("/openenv/reset")
-def reset(request: ResetRequest) -> dict[str, Any]:
+def reset(request: ResetRequest | None = Body(default=None)) -> dict[str, Any]:
     global _ENV
     global _OBSERVATION
     global _CURRENT_DIFFICULTY
 
-    _CURRENT_DIFFICULTY = request.difficulty
-    _ENV = RescueEnvironment(difficulty=request.difficulty)
-    _OBSERVATION = _ENV.reset(seed=request.seed)
+    req = request or ResetRequest()
+
+    _CURRENT_DIFFICULTY = req.difficulty
+    _ENV = RescueEnvironment(difficulty=req.difficulty)
+    _OBSERVATION = _ENV.reset(seed=req.seed)
 
     return {
         "difficulty": _CURRENT_DIFFICULTY,
@@ -71,13 +73,25 @@ def reset(request: ResetRequest) -> dict[str, Any]:
 
 @app.post("/step")
 @app.post("/openenv/step")
-def step(request: StepRequest) -> dict[str, Any]:
+def step(request: StepRequest | dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
     global _OBSERVATION
     if _OBSERVATION is None:
         _OBSERVATION = _ENV.reset(seed=42)
 
+    action: dict[str, Any]
+    if isinstance(request, StepRequest):
+        action = request.action if isinstance(request.action, dict) else {}
+    elif isinstance(request, dict):
+        wrapped = request.get("action") if isinstance(request.get("action"), dict) else None
+        action = wrapped if wrapped is not None else request
+    else:
+        action = {}
+
+    if not isinstance(action, dict) or "action_type" not in action:
+        action = {"action_type": "idle", "parameters": {}}
+
     try:
-        observation, reward, done, truncated, info = _ENV.step(request.action)
+        observation, reward, done, truncated, info = _ENV.step(action)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
